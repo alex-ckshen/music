@@ -14,24 +14,35 @@
         }
         canvas {
             display: block;
-            filter: blur(2px); /* Subtle overall blur for fluidity */
+            filter: blur(2px);
+            width: 100vw;
+            height: 100vh;
         }
-        #fullscreen-btn, #settings-btn {
+        #button-container {
             position: absolute;
             top: 10px;
             right: 10px;
-            padding: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
+        /* No longer needed
+        #bottom-button-container { ... }
+        */
+        #fullscreen-btn, #settings-btn, #mic-btn, #audio-btn {
+            padding: 10px 20px;
             background: rgba(255, 255, 255, 0.1);
             color: white;
             border: none;
             cursor: pointer;
-            z-index: 10;
+            border-radius: 25px;
+            transition: background 0.3s;
         }
-        #settings-btn {
-            right: 120px;
-        }
-        #fullscreen-btn:hover, #settings-btn:hover {
+        #fullscreen-btn:hover, #settings-btn:hover, #mic-btn:hover, #audio-btn:hover {
             background: rgba(255, 255, 255, 0.2);
+        }
+        #mic-btn.mic-on {
+            background: rgba(255, 99, 71, 0.4); /* Red hue */
         }
         #settings-panel {
             position: absolute;
@@ -44,10 +55,12 @@
             z-index: 20;
             display: none;
             max-width: 300px;
+            text-align: center;
         }
         #settings-panel label {
             display: block;
             margin: 10px 0;
+            font-family: 'Times New Roman', serif;
         }
         #settings-panel ul {
             list-style: none;
@@ -55,11 +68,13 @@
             margin: 0;
         }
         #settings-panel li {
-            padding: 10px;
+            padding: 10px 20px;
             background: rgba(255, 255, 255, 0.1);
             margin: 5px 0;
             cursor: pointer;
             text-align: center;
+            border-radius: 25px; /* Capsule shape for list items */
+            font-family: 'Times New Roman', serif;
         }
         #settings-panel li:hover {
             background: rgba(255, 255, 255, 0.2);
@@ -70,34 +85,52 @@
         #custom-color-picker {
             display: none;
         }
+        video {
+            display: none;
+        }
+        @media (max-width: 768px) {
+            #button-container {
+                left: 50%;
+                right: auto;
+                transform: translateX(-50%);
+                top: 10px;
+            }
+        }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
-    <button id="fullscreen-btn">Fullscreen</button>
-    <button id="settings-btn">Settings</button>
+    <div id="button-container">
+        <button id="mic-btn">Microphone</button>
+        <button id="audio-btn">Audio</button>
+        <button id="fullscreen-btn">Fullscreen</button>
+        <button id="settings-btn">Settings</button>
+    </div>
     <div id="settings-panel">
-        <label>Color Theme:</label>
+        <label>Theme</label>
         <ul id="theme-list">
-            <li data-theme="blue" class="selected">Blue (Default)</li>
+            <li data-theme="blue" class="selected">Blue</li>
             <li data-theme="red">Fiery Red</li>
             <li data-theme="green">Vibrant Green</li>
             <li data-theme="purple">Purple Haze</li>
-            <li data-theme="rainbow">Rainbow</li>
+            <li data-theme="rainbow">Neon Blue</li>
             <li data-theme="custom">Custom</li>
         </ul>
         <div id="custom-color-picker">
-            <label for="custom-color">Choose Main Color:</label>
+            <label for="custom-color">Choose Main Color</label>
             <input type="color" id="custom-color" value="#0000FF">
         </div>
-
-        <label>Visualization Style:</label>
+        <br>
+        <label>Visualizations</label>
         <ul id="viz-list">
             <li data-viz="bars">Bars</li>
             <li data-viz="waves">Waves</li>
-            <li data-viz="circular" class="selected">Circular (Default)</li>
+            <li data-viz="circular" class="selected">Circular</li>
         </ul>
     </div>
+    <video id="silent-video" autoplay muted loop>
+        <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
+    </video>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -108,17 +141,24 @@
         const vizList = document.getElementById('viz-list');
         const customColorPicker = document.getElementById('custom-color-picker');
         const customColor = document.getElementById('custom-color');
+        const micBtn = document.getElementById('mic-btn');
+        const audioBtn = document.getElementById('audio-btn');
+        const silentVideo = document.getElementById('silent-video');
 
         let currentTheme = 'blue';
-        let currentViz = 'circular'; // Default to circular
-        let mainHue = 210; // Blue
+        let currentViz = 'circular';
+        let mainHue = 210;
+        let audioSource = null;
+        let micActive = false;
+        let micStream = null; // To store the mic stream for stopping tracks
 
         const themeHues = {
             blue: 210,
             red: 0,
             green: 120,
             purple: 270,
-            rainbow: null
+            rainbow: 200,
+            custom: null
         };
 
         function hexToHsl(hex) {
@@ -151,7 +191,6 @@
             }
         }
 
-        // Clickable list for themes
         themeList.querySelectorAll('li').forEach(li => {
             li.addEventListener('click', () => {
                 themeList.querySelectorAll('li').forEach(l => l.classList.remove('selected'));
@@ -162,7 +201,6 @@
             });
         });
 
-        // Clickable list for viz
         vizList.querySelectorAll('li').forEach(li => {
             li.addEventListener('click', () => {
                 vizList.querySelectorAll('li').forEach(l => l.classList.remove('selected'));
@@ -173,7 +211,6 @@
 
         customColor.addEventListener('input', updateTheme);
 
-        // Close settings on click outside
         document.addEventListener('click', (event) => {
             if (!settingsPanel.contains(event.target) && event.target !== settingsBtn) {
                 settingsPanel.style.display = 'none';
@@ -191,6 +228,14 @@
         resizeCanvas();
         window.addEventListener('resize', resizeCanvas);
 
+        document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) {
+                fullscreenBtn.textContent = 'Exit Fullscreen';
+            } else {
+                fullscreenBtn.textContent = 'Fullscreen';
+            }
+        });
+
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement) {
                 document.documentElement.requestFullscreen().catch(err => console.error(err));
@@ -199,200 +244,252 @@
             }
         });
 
-        // Explicitly trigger getDisplayMedia to ensure share screen popup
-        function startScreenShare() {
-            navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
-                .then(stream => {
-                    // Stop video tracks immediately to avoid displaying screen
-                    stream.getVideoTracks().forEach(track => track.stop());
-
-                    // Use only audio tracks
-                    const audioStream = new MediaStream(stream.getAudioTracks());
-
-                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    const source = audioCtx.createMediaStreamSource(audioStream);
-                    const analyser = audioCtx.createAnalyser();
-                    analyser.fftSize = 2048;
-                    source.connect(analyser);
-
-                    const bufferLength = analyser.frequencyBinCount;
-                    const dataArray = new Uint8Array(bufferLength);
-
-                    // Create shuffled indices for randomization (no repeat)
-                    let shuffled = Array.from({length: bufferLength}, (_, i) => i);
-                    // Fisher-Yates shuffle
-                    for (let i = shuffled.length - 1; i > 0; i--) {
-                        const j = Math.floor(Math.random() * (i + 1));
-                        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-                    }
-                    const effectiveLength = bufferLength;
-
-                    let rotationOffset = 0; // For dynamic rotation
-
-                    function getColor(i, effectiveLength) {
-                        if (currentTheme === 'rainbow') {
-                            return `hsl(${i * 360 / effectiveLength}, 100%, 50%)`;
-                        } else {
-                            const hueVariation = (i / effectiveLength - 0.5) * 60;
-                            const variedHue = (mainHue + hueVariation + 360) % 360;
-                            return `hsl(${variedHue}, 80%, 60%)`;
-                        }
-                    }
-
-                    function draw() {
-                        requestAnimationFrame(draw);
-                        analyser.getByteFrequencyData(dataArray);
-
-                        ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
-                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-                        // Find max for normalization
-                        let maxData = 0;
-                        for (let i = 0; i < bufferLength; i++) {
-                            if (dataArray[i] > maxData) maxData = dataArray[i];
-                        }
-                        const scale = maxData > 0 ? 255 / maxData : 1;
-
-                        // Bass for pulsing circle
-                        let bass = 0;
-                        for (let i = 0; i < 50; i++) {
-                            bass += dataArray[i];
-                        }
-                        bass /= 50 * 255;
-                        const bassRadius = 50 + bass * 150;
-
-                        ctx.beginPath();
-                        ctx.arc(canvas.width / 2, canvas.height / 2, bassRadius, 0, Math.PI * 2);
-                        ctx.fillStyle = `rgba(255, 255, 255, ${bass * 0.5})`;
-                        ctx.shadowBlur = 30;
-                        ctx.shadowColor = getColor(effectiveLength / 2, effectiveLength);
-                        ctx.fill();
-                        ctx.shadowBlur = 0;
-
-                        if (currentViz === 'bars') {
-                            const barWidth = (canvas.width / bufferLength) * 2.5;
-                            let x = 0;
-                            for (let i = 0; i < bufferLength; i++) {
-                                const normalized = dataArray[i] * scale / 255;
-                                const height = normalized * (canvas.height / 3);
-                                const color = getColor(i, bufferLength);
-                                ctx.fillStyle = color;
-                                ctx.shadowBlur = 10;
-                                ctx.shadowColor = color;
-                                ctx.fillRect(x, canvas.height - height, barWidth, height);
-                                ctx.fillRect(x, 0, barWidth, height);
-                                ctx.shadowBlur = 0;
-                                x += barWidth;
-                            }
-                        } else if (currentViz === 'waves') {
-                            const centerX = canvas.width / 2;
-                            const halfLength = bufferLength / 2;
-                            const sliceWidth = canvas.width / bufferLength;
-
-                            // Bottom wave - right from center
-                            ctx.beginPath();
-                            ctx.moveTo(centerX, canvas.height / 2);
-                            let x = centerX;
-                            for (let i = 0; i < halfLength; i++) {
-                                const normalized = dataArray[i] * scale / 255;
-                                const v = normalized;
-                                const y = canvas.height / 2 + v * (canvas.height / 4);
-                                ctx.lineTo(x, y);
-                                x += sliceWidth;
-                            }
-                            ctx.strokeStyle = getColor(halfLength, bufferLength);
-                            ctx.lineWidth = 2;
-                            ctx.stroke();
-
-                            // Bottom wave - left from center (mirrored)
-                            ctx.beginPath();
-                            ctx.moveTo(centerX, canvas.height / 2);
-                            x = centerX;
-                            for (let i = 0; i < halfLength; i++) {
-                                const normalized = dataArray[i] * scale / 255;
-                                const v = normalized;
-                                const y = canvas.height / 2 + v * (canvas.height / 4);
-                                ctx.lineTo(x, y);
-                                x -= sliceWidth;
-                            }
-                            ctx.stroke();
-
-                            // Mirror to top - right
-                            ctx.beginPath();
-                            ctx.moveTo(centerX, canvas.height / 2);
-                            x = centerX;
-                            for (let i = 0; i < halfLength; i++) {
-                                const normalized = dataArray[i] * scale / 255;
-                                const v = normalized;
-                                const y = canvas.height / 2 - v * (canvas.height / 4);
-                                ctx.lineTo(x, y);
-                                x += sliceWidth;
-                            }
-                            ctx.stroke();
-
-                            // Mirror to top - left
-                            ctx.beginPath();
-                            ctx.moveTo(centerX, canvas.height / 2);
-                            x = centerX;
-                            for (let i = 0; i < halfLength; i++) {
-                                const normalized = dataArray[i] * scale / 255;
-                                const v = normalized;
-                                const y = canvas.height / 2 - v * (canvas.height / 4);
-                                ctx.lineTo(x, y);
-                                x -= sliceWidth;
-                            }
-                            ctx.stroke();
-                        } else if (currentViz === 'circular') {
-                            const centerX = canvas.width / 2;
-                            const centerY = canvas.height / 2;
-                            const baseRadius = Math.min(centerX, centerY) / 3;
-                            const maxOffset = baseRadius * 1.5;
-
-                            // Fixed max rotation speed (randomness 100)
-                            rotationOffset = (rotationOffset + 0.5) % effectiveLength;
-
-                            ctx.beginPath();
-                            for (let i = 0; i < effectiveLength; i++) {
-                                const shiftedIndex = (i + Math.floor(rotationOffset)) % effectiveLength;
-                                const binIndex = shuffled[shiftedIndex];
-                                let normalized = dataArray[binIndex] * scale / 255;
-                                // Randomly set to zero for gaps (30% chance)
-                                if (Math.random() < 0.3) {
-                                    normalized = 0;
-                                }
-                                const radius = baseRadius + normalized * maxOffset;
-                                const angle = (i / effectiveLength) * Math.PI * 2;
-                                const px = centerX + radius * Math.cos(angle);
-                                const py = centerY + radius * Math.sin(angle);
-                                if (i === 0) {
-                                    ctx.moveTo(px, py);
-                                } else {
-                                    ctx.lineTo(px, py);
-                                }
-                            }
-                            ctx.closePath();
-                            const centralColor = getColor(effectiveLength / 2, effectiveLength);
-                            ctx.strokeStyle = centralColor;
-                            ctx.lineWidth = 2;
-                            ctx.shadowBlur = 10;
-                            ctx.shadowColor = centralColor;
-                            ctx.stroke();
-                            ctx.shadowBlur = 0;
-                        }
-                    }
-
-                    draw();
-                })
-                .catch(err => {
-                    console.error('Error accessing screen/audio:', err);
-                    alert('Please allow screen sharing with audio to visualize any audio playing on your device. Select "Share audio" in the prompt. If the popup doesn\'t appear, ensure your browser permissions allow it.');
-                });
+        function initSystemAudio() {
+            if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+                    .then(stream => {
+                        stream.getVideoTracks().forEach(track => track.stop());
+                        const audioStream = new MediaStream(stream.getAudioTracks());
+                        setupAudioContext(audioStream);
+                    })
+                    .catch(err => {
+                        console.error('Initial system audio capture failed:', err);
+                        alert('System audio capture failed. Please use the Audio button to retry or switch to Microphone.');
+                    });
+            } else if (navigator.userAgent.match(/iPhone|iPad|Android/i)) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => setupAudioContext(stream))
+                    .catch(err => {
+                        console.error('Mobile audio failed:', err);
+                        alert('Audio access failed on mobile. Please use the Microphone button.');
+                    });
+            }
         }
 
-        // Trigger screen sharing when the page loads
-        window.addEventListener('load', startScreenShare);
+        micBtn.addEventListener('click', () => {
+            if (!micActive) {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    navigator.mediaDevices.getUserMedia({ audio: true })
+                        .then(stream => {
+                            micStream = stream;
+                            if (audioSource) audioSource.disconnect();
+                            setupAudioContext(stream);
+                            micBtn.textContent = 'Mute Mic';
+                            micBtn.classList.add('mic-on');
+                            micActive = true;
+                        })
+                        .catch(err => {
+                            console.error('Microphone access failed:', err);
+                            alert('Please allow microphone access.');
+                        });
+                }
+            } else {
+                if (micStream) {
+                    micStream.getTracks().forEach(track => track.stop()); // Completely cut off access
+                    micStream = null;
+                }
+                if (audioSource) audioSource.disconnect();
+                micBtn.textContent = 'Microphone';
+                micBtn.classList.remove('mic-on');
+                micActive = false;
+                initSystemAudio();
+            }
+        });
 
-        // Initialize
+        audioBtn.addEventListener('click', () => {
+            if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
+                    .then(stream => {
+                        stream.getVideoTracks().forEach(track => track.stop());
+                        const audioStream = new MediaStream(stream.getAudioTracks());
+                        if (audioSource) audioSource.disconnect();
+                        setupAudioContext(audioStream);
+                    })
+                    .catch(err => {
+                        console.error('System audio capture retry failed:', err);
+                        alert('System audio capture failed. Please try again or use Microphone.');
+                    });
+            } else if (navigator.userAgent.match(/iPhone|iPad|Android/i)) {
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(stream => {
+                        if (audioSource) audioSource.disconnect();
+                        setupAudioContext(stream);
+                    })
+                    .catch(err => {
+                        console.error('Mobile audio failed:', err);
+                        alert('Audio access failed on mobile. Please use the Microphone button.');
+                    });
+            }
+        });
+
+        function setupAudioContext(stream) {
+            if (audioSource) audioSource.disconnect();
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            audioSource = audioCtx.createMediaStreamSource(stream);
+            const analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            audioSource.connect(analyser);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            let shuffled = Array.from({length: bufferLength}, (_, i) => i);
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            const effectiveLength = bufferLength;
+
+            let rotationOffset = 0;
+
+            function getColor(i, effectiveLength) {
+                if (currentTheme === 'rainbow') {
+                    return `hsl(${i * 360 / effectiveLength}, 100%, 50%)`;
+                } else {
+                    const hueVariation = (i / effectiveLength - 0.5) * 60;
+                    const variedHue = (mainHue + hueVariation + 360) % 360;
+                    return `hsl(${variedHue}, 80%, 60%)`;
+                }
+            }
+
+            function draw() {
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                let maxData = 0;
+                for (let i = 0; i < bufferLength; i++) {
+                    if (dataArray[i] > maxData) maxData = dataArray[i];
+                }
+                const scale = maxData > 0 ? 255 / maxData : 1;
+
+                let bass = 0;
+                for (let i = 0; i < 50; i++) {
+                    bass += dataArray[i];
+                }
+                bass /= 50 * 255;
+                const bassRadius = Math.min(canvas.width, canvas.height) / 20 + bass * Math.min(canvas.width, canvas.height) / 6.67;
+
+                ctx.beginPath();
+                ctx.arc(canvas.width / 2, canvas.height / 2, bassRadius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${bass * 0.5})`;
+                ctx.shadowBlur = 30;
+                ctx.shadowColor = getColor(effectiveLength / 2, effectiveLength);
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                if (currentViz === 'bars') {
+                    const barWidth = (canvas.width / bufferLength) * 2.5;
+                    let x = 0;
+                    for (let i = 0; i < bufferLength; i++) {
+                        const normalized = dataArray[i] * scale / 255;
+                        const height = normalized * (canvas.height / 3);
+                        const color = getColor(i, bufferLength);
+                        ctx.fillStyle = color;
+                        ctx.shadowBlur = 10;
+                        ctx.shadowColor = color;
+                        ctx.fillRect(x, canvas.height - height, barWidth, height);
+                        ctx.fillRect(x, 0, barWidth, height);
+                        ctx.shadowBlur = 0;
+                        x += barWidth;
+                    }
+                } else if (currentViz === 'waves') {
+                    const centerX = canvas.width / 2;
+                    const halfLength = bufferLength / 2;
+                    const sliceWidth = canvas.width / bufferLength;
+
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, canvas.height / 2);
+                    let x = centerX;
+                    for (let i = 0; i < halfLength; i++) {
+                        const normalized = dataArray[i] * scale / 255;
+                        const v = normalized;
+                        const y = canvas.height / 2 + v * (canvas.height / 4);
+                        ctx.lineTo(x, y);
+                        x += sliceWidth;
+                    }
+                    ctx.strokeStyle = getColor(halfLength, bufferLength);
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, canvas.height / 2);
+                    x = centerX;
+                    for (let i = 0; i < halfLength; i++) {
+                        const normalized = dataArray[i] * scale / 255;
+                        const v = normalized;
+                        const y = canvas.height / 2 + v * (canvas.height / 4);
+                        ctx.lineTo(x, y);
+                        x -= sliceWidth;
+                    }
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, canvas.height / 2);
+                    x = centerX;
+                    for (let i = 0; i < halfLength; i++) {
+                        const normalized = dataArray[i] * scale / 255;
+                        const v = normalized;
+                        const y = canvas.height / 2 - v * (canvas.height / 4);
+                        ctx.lineTo(x, y);
+                        x += sliceWidth;
+                    }
+                    ctx.stroke();
+
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, canvas.height / 2);
+                    x = centerX;
+                    for (let i = 0; i < halfLength; i++) {
+                        const normalized = dataArray[i] * scale / 255;
+                        const v = normalized;
+                        const y = canvas.height / 2 - v * (canvas.height / 4);
+                        ctx.lineTo(x, y);
+                        x -= sliceWidth;
+                    }
+                    ctx.stroke();
+                } else if (currentViz === 'circular') {
+                    const centerX = canvas.width / 2;
+                    const centerY = canvas.height / 2;
+                    const baseRadius = Math.min(centerX, centerY) / 3;
+                    const maxOffset = baseRadius * 1.5;
+
+                    rotationOffset = (rotationOffset + 0.5) % effectiveLength;
+
+                    ctx.beginPath();
+                    for (let i = 0; i < effectiveLength; i++) {
+                        const shiftedIndex = (i + Math.floor(rotationOffset)) % effectiveLength;
+                        const binIndex = shuffled[shiftedIndex];
+                        let normalized = dataArray[binIndex] * scale / 255;
+                        if (Math.random() < 0.3) {
+                            normalized = 0;
+                        }
+                        const radius = baseRadius + normalized * maxOffset;
+                        const angle = (i / effectiveLength) * Math.PI * 2;
+                        const px = centerX + radius * Math.cos(angle);
+                        const py = centerY + radius * Math.sin(angle);
+                        if (i === 0) {
+                            ctx.moveTo(px, py);
+                        } else {
+                            ctx.lineTo(px, py);
+                        }
+                    }
+                    ctx.closePath();
+                    const centralColor = getColor(effectiveLength / 2, effectiveLength);
+                    ctx.strokeStyle = centralColor;
+                    ctx.lineWidth = 2;
+                    ctx.shadowBlur = 10;
+                    ctx.shadowColor = centralColor;
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+            }
+
+            draw();
+        }
+
+        window.addEventListener('load', initSystemAudio);
         updateTheme();
     </script>
 </body>
