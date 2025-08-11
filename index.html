@@ -128,7 +128,7 @@
             <li data-viz="circular" class="selected">Circular</li>
         </ul>
     </div>
-    <video id="silent-video" autoplay muted loop>
+    <video id="silent-video" autoplay muted loop playsinline>
         <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
     </video>
     <script>
@@ -323,6 +323,10 @@
         });
 
         function setupAudioContext(stream) {
+            // Play a silent, invisible video in a loop to prevent the OS screensaver/sleep mode.
+            // This is a common trick for applications that need to stay active.
+            silentVideo.play().catch(e => console.warn("Anti-screensaver video could not start.", e));
+
             if (audioSource) audioSource.disconnect();
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioSource = audioCtx.createMediaStreamSource(stream);
