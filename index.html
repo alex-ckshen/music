@@ -26,9 +26,15 @@
             gap: 10px;
             z-index: 10;
         }
-        /* No longer needed
-        #bottom-button-container { ... }
-        */
+        #bottom-button-container {
+            position: absolute;
+            bottom: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 10;
+        }
         #fullscreen-btn, #settings-btn, #mic-btn, #audio-btn {
             padding: 10px 20px;
             background: rgba(255, 255, 255, 0.1);
@@ -42,7 +48,10 @@
             background: rgba(255, 255, 255, 0.2);
         }
         #mic-btn.mic-on {
-            background: rgba(255, 99, 71, 0.4); /* Red hue */
+            background: rgba(144, 238, 144, 0.3); /* Light green hue when on */
+        }
+        #mic-btn.mic-off {
+            background: rgba(255, 99, 71, 0.3); /* Red hue when muted */
         }
         #settings-panel {
             position: absolute;
@@ -95,12 +104,21 @@
                 transform: translateX(-50%);
                 top: 10px;
             }
+            #bottom-button-container {
+                display: flex;
+            }
         }
     </style>
 </head>
 <body>
     <canvas id="canvas"></canvas>
     <div id="button-container">
+        <button id="mic-btn">Microphone</button>
+        <button id="audio-btn">Audio</button>
+        <button id="fullscreen-btn">Fullscreen</button>
+        <button id="settings-btn">Settings</button>
+    </div>
+    <div id="bottom-button-container" style="display: none;">
         <button id="mic-btn">Microphone</button>
         <button id="audio-btn">Audio</button>
         <button id="fullscreen-btn">Fullscreen</button>
@@ -128,9 +146,6 @@
             <li data-viz="circular" class="selected">Circular</li>
         </ul>
     </div>
-    <video id="silent-video" autoplay muted loop playsinline>
-        <source src="https://www.w3schools.com/html/mov_bbb.mp4" type="video/mp4">
-    </video>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
@@ -143,14 +158,15 @@
         const customColor = document.getElementById('custom-color');
         const micBtn = document.getElementById('mic-btn');
         const audioBtn = document.getElementById('audio-btn');
-        const silentVideo = document.getElementById('silent-video');
+        const bottomButtonContainer = document.getElementById('bottom-button-container');
 
         let currentTheme = 'blue';
         let currentViz = 'circular';
         let mainHue = 210;
         let audioSource = null;
         let micActive = false;
-        let micStream = null; // To store the mic stream for stopping tracks
+        let micStream = null;
+        let wakeLock = null;
 
         const themeHues = {
             blue: 210,
@@ -244,7 +260,32 @@
             }
         });
 
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    wakeLock.addEventListener('release', () => {
+                        console.log('Screen Wake Lock released');
+                    });
+                    console.log('Screen Wake Lock acquired');
+                } catch (err) {
+                    console.error('Wake Lock error:', err);
+                }
+            } else {
+                console.warn('Wake Lock API not supported');
+            }
+        }
+
+        function releaseWakeLock() {
+            if (wakeLock) {
+                wakeLock.release().then(() => {
+                    wakeLock = null;
+                });
+            }
+        }
+
         function initSystemAudio() {
+            requestWakeLock(); // Acquire wake lock
             if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
                 navigator.mediaDevices.getDisplayMedia({ video: true, audio: true })
                     .then(stream => {
@@ -275,7 +316,8 @@
                             if (audioSource) audioSource.disconnect();
                             setupAudioContext(stream);
                             micBtn.textContent = 'Mute Mic';
-                            micBtn.classList.add('mic-on');
+                            micBtn.classList.remove('mic-on');
+                            micBtn.classList.add('mic-off');
                             micActive = true;
                         })
                         .catch(err => {
@@ -290,7 +332,8 @@
                 }
                 if (audioSource) audioSource.disconnect();
                 micBtn.textContent = 'Microphone';
-                micBtn.classList.remove('mic-on');
+                micBtn.classList.remove('mic-off');
+                micBtn.classList.add('mic-on');
                 micActive = false;
                 initSystemAudio();
             }
@@ -323,15 +366,11 @@
         });
 
         function setupAudioContext(stream) {
-            // Play a silent, invisible video in a loop to prevent the OS screensaver/sleep mode.
-            // This is a common trick for applications that need to stay active.
-            silentVideo.play().catch(e => console.warn("Anti-screensaver video could not start.", e));
-
             if (audioSource) audioSource.disconnect();
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             audioSource = audioCtx.createMediaStreamSource(stream);
             const analyser = audioCtx.createAnalyser();
-            analyser.fftSize = 2048;
+            analyser.fftSize = 1024; // Reduced for memory optimization
             audioSource.connect(analyser);
 
             const bufferLength = analyser.frequencyBinCount;
@@ -348,7 +387,9 @@
 
             function getColor(i, effectiveLength) {
                 if (currentTheme === 'rainbow') {
-                    return `hsl(${i * 360 / effectiveLength}, 100%, 50%)`;
+                    const hueVariation = (i / effectiveLength - 0.5) * 30; // Small variation around blue
+                    const variedHue = (200 + hueVariation + 360) % 360;
+                    return `hsl(${variedHue}, 80%, 60%)`;
                 } else {
                     const hueVariation = (i / effectiveLength - 0.5) * 60;
                     const variedHue = (mainHue + hueVariation + 360) % 360;
@@ -360,7 +401,7 @@
                 requestAnimationFrame(draw);
                 analyser.getByteFrequencyData(dataArray);
 
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.1)'; // Increased alpha for faster fade to black
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
 
                 let maxData = 0;
